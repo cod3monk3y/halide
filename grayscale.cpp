@@ -28,6 +28,10 @@ void manualCheckerboard();
 void imageMathXorCheckerboard();
 void swizzleColors();
 void compositionOfTwo1DFuncs();
+void expressionsTakeParentVariables();
+void expressionWithNestedScopeVariable();
+void sobel();
+void grayscale();
 
 int _errors = 0;
 
@@ -50,6 +54,10 @@ void runOtherTests()
 	imageMathXorCheckerboard();
 	swizzleColors();
 	compositionOfTwo1DFuncs();
+	expressionsTakeParentVariables();
+	expressionWithNestedScopeVariable();
+	sobel();
+	grayscale();
 	
 	if(_errors == 0) {
 		printf("Success! (0 errors)\n");
@@ -337,6 +345,107 @@ void compositionOfTwo1DFuncs()
 			assertEqual(v, img(i,j), buf);
 		}
 	}
+}
+
+// expressions should take variables from the parent function
+void expressionsTakeParentVariables()
+{
+	printf("expressionsTakeParentVariables\n");
+	
+	Halide::Expr a, b;
+	Halide::Var x, y;
+	Halide::Func f;
+	
+	a = x*x;
+	b = y+y;
+	f(x,y) = a + b; // x*x + y+y = x^2 + 2y
+	
+	Halide::Image<int> img = f.realize(10,10);
+	
+	for(int i=0; i<img.width(); i++) {
+		for (int j=0; j<img.height(); j++) {
+			int v = i*i + j+j;
+			assertEqual(v, img(i,j), "");
+		}
+	}
+}
+
+// expression of X in nested function takes local definition of X
+void expressionWithNestedScopeVariable()
+{
+	printf("expressionWithNestedScopeVariable\n");
+	
+	Halide::Expr a, b;
+	Halide::Var x, y;
+	Halide::Func f, g,  h;
+	
+	a = x*x;
+	b = x+x;
+	
+	g(x) = a;
+	h(x) = b;
+	f(x,y) = g(x) + h(y); // a(x) + b(y) = x*x + y+y = x^2 + 2y
+	
+	Halide::Image<int> img = f.realize(10,10);
+	for(int i=0; i<img.width(); i++) {
+		for (int j=0; j<img.height(); j++) {
+			int v = i*i + 2*j;
+			
+			assertEqual(v, img(i,j), "");
+		}
+	}
+} 
+
+void grayscale()
+{
+	printf("grayscale\n");
+	
+	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
+	
+	Halide::Func f;
+	Halide::Var x, y, c;
+	
+	// each color component is the same
+	// min() in case the values overflow
+	// cast() to convert the floating point values back to U8 [0..255]
+	f(x,y,c) = Halide::cast<uint8_t>(min( 
+		0.299f * input(x,y,0) + // red -- converts to floating point
+		0.587f * input(x,y,1) + // green
+		0.114f * input(x,y,2) 	// blue
+		, 255.0f)
+	);
+		
+	Halide::Image<uint8_t> output = f.realize( input.width(), input.height(), input.channels());
+	save(output, "grayscale.png");
+}
+
+// sobel filter 
+void sobel()
+{
+	printf ("sobel\n");
+
+	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
+	
+	Halide::Var x, y, c;
+	Halide::Func f;
+	Halide::Expr vs, hs; // vertical sobel filter, horizontal sobel filter
+	
+	// horizontal sobel kernel
+	hs = -1.0f * input(max(x-1,0),max(y-1,0),c) + /*0*/ 1.0f * input(x+1,max(y-1,0),c) +
+	     -2.0f * input(max(x-1,0),y,c)          + /*0*/ 2.0f * input(x+1,y,c) +
+		 -1.0f * input(max(x-1,0),y+1,c)        + /*0*/ 1.0f * input(x+1,y+1,c);
+		
+	// vertical sobel kernel
+	vs = -1.0f * input(max(x-1,0),max(y-1,0),c) - 2.0f * input(x,max(y-1,0),c)   - 1.0f * input(x+1,max(y-1,0),c) +
+			/* 0 + 0 + 0 */
+		  1.0f * input(max(x-1,0),y+1,c)        + 2.0f * input(x,y+1,c)          + 1.0f * input(x+1,y+1,c);
+	
+	// compute the magnitude of the sobel filter (per component)
+	f(x,y,c) = Halide::cast<uint8_t>( min( sqrt(vs*vs + hs*hs), 255.0f));
+	
+	// HACK: skip the last pixel (width, height) so we don't have to do a min() in the expressions above
+	Halide::Image<uint8_t> output = f.realize( input.width()-1, input.height()-1, input.channels() );
+	save(output, "sobel.png");
 }
 
 int main(int argc, char **argv) {
