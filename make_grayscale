@@ -1,0 +1,2 @@
+g++ grayscale.cpp -I ../src/include -L ../src/bin -lHalide `libpng-config --cflags --ldflags` -o grayscale
+DYLD_LIBRARY_PATH=../src/bin ./grayscale
