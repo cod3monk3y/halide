@@ -43,6 +43,12 @@ void official_convolve();
 void rdom_dimensionality();
 void lambda_intro(); // first lambda test
 void official_side_effects();
+void extern_c();
+void power_function(); // extern_c falloff image generator
+void power_native(); // all-native power function
+void checkerboard();
+void colored_checkerboard();
+
 
 int _errors = 0;
 
@@ -52,6 +58,13 @@ void runOtherTests()
 	printf("__Running Tests__\n");
 
 	// newest first so they fail faster
+	colored_checkerboard();
+	
+	#if 0 // disabled for development
+	checkerboard();
+	power_native();
+	power_function();
+	extern_c();
 	official_side_effects();
 	lambda_intro();
 	rdom_dimensionality();
@@ -83,6 +96,7 @@ void runOtherTests()
 	expressionWithNestedScopeVariable();
 	sobel();
 	grayscale();
+	#endif
 	
 	if(_errors == 0) {
 		printf("Success! (0 errors)\n");
@@ -882,8 +896,148 @@ void official_side_effects()
 		assertEqual(-60, idx, "official_side_effects");
 }
 
+// extern_c method declaration
+//
+extern "C" int __extern_c_function(int x0, int y0, int x, int y)
+{
+	// compute distance from center
+	int dx = x-x0;
+	int dy = y-y0;
+	return (int)sqrt( dx*dx + dy*dy );
+}
+HalideExtern_4(int, __extern_c_function, int, int, int, int);
 
-int main(int argc, char **argv) {
+void extern_c()
+{
+	printf("extern_c\n");
+	
+	Halide::Image<int> input(256,256);
+	input(0,0) = 1;
+	input(0,1) = 2;
+	int x0 = 128;
+	int y0 = 128;
+	
+	Halide::Func f; 
+	Halide::Var x, y;
+	f(x,y) = __extern_c_function(x0, y0, x, y);
+	
+	Halide::Image<int> output = f.realize(256,256);
+	
+	assertEqual(1, input(0,0), "0,0");
+	assertEqual(0, output(x0,y0), "x0,y0");
+	
+	// check every pixel
+	for(int i=0; i<256; i++) {
+		for (int j=0; j<256; j++) {
+			int expected = __extern_c_function(x0,y0,i,j); // call it directly, just to make sure Func is calling it
+			assertEqual(expected, output(i,j), "i,j" );
+		}
+	}
+}
+
+extern "C" float __dist(int x0, int y0, int x, int y)
+{
+	float dx = (x-x0), 
+		  dy = (y-y0);
+	
+	return (float)sqrt(dx*dx + dy*dy);
+}
+
+HalideExtern_4(float, __dist, int, int, int, int);
+
+// Generate a power function falloff image (for exmaple for use in computer graphics)
+void power_function() // extern_c falloff image generator
+{
+	printf("power_function\n");
+	
+	Halide::Var x, y, c;
+	Halide::Func fpow, f;
+	float k = 3.0f;
+	
+	fpow(x,y,c) = 255.0f * (1-Halide::pow(__dist(0, 0, x, y) / 256.0f, k ));
+	
+	f(x,y,c) = Halide::cast<uint8_t>( Halide::clamp(fpow(x,y,c), 0, 255.0f));
+	
+	Halide::Image<uint8_t> output = f.realize(256,256,3);
+	
+	//Halide::Image<uint8_t> output = Halide::cast<uint8_t>( min(255.0f, f.realize(256,256,3) ));
+	save(output, "power_function.png");
+}
+
+// there actually *is* a distance function in halide, it's "hypot"
+// offseting this, too, to create a power/falloff image centered at 0.5,0.5
+void power_native()
+{
+	printf("power_native\n");
+	
+	Halide::Var x, y, c;
+	Halide::Func fpow, f;
+	float k = 3.0f;
+	int x0 = 128, y0 = 128;
+	
+	fpow(x,y,c) = 255.0f * (1-Halide::pow(Halide::hypot(x-x0, y-y0) / 128.0f, k ));
+	
+	f(x,y,c) = Halide::cast<uint8_t>( Halide::clamp(fpow(x,y,c), 0, 255.0f));
+	Halide::Image<uint8_t> output = f.realize(256,256,3);
+	save(output, "power_native.png");
+}
+
+void checkerboard()
+{
+	printf("checkerboard\n");
+	
+	// generate a checkerboard pattern
+	Halide::Var x, y, c;
+	Halide::Expr is_lit;
+	Halide::Func f;
+
+	int shift = 5;
+	
+	is_lit = ((x>>shift&1) ^ (y>>shift&1))==1; // calculation of a checkerboard
+	
+	// NOTE: without uint8_t cast, interprets the <int> output as <u8> which makes a funny picture
+	f(x,y,c) = Halide::cast<uint8_t>( Halide::select(is_lit, 255, 0) ); 
+	
+	
+	Halide::Image<uint8_t> output = f.realize(256,256,3);
+	
+	/*Halide::cast<uint8_t>( 
+		lambda(x, y, c, Halide::select(is_lit, 0, 255)).realize(256,256,3)
+		);*/
+	save(output, "checkerboard.png");
+}
+
+// displays the use of a select "case" statement for the color
+void colored_checkerboard()
+{
+	printf("colored_checkerboard\n");
+	
+	// generate a colored checkerboard pattern
+	Halide::Var x, y, c;
+	Halide::Expr is_lit;
+	Halide::Expr get_lit_color;
+	Halide::Expr get_unlit_color;
+	Halide::Func f;
+	
+	int lit_r = 255, lit_g = 0, lit_b = 0;
+	int unlit_r = 0, unlit_g = 255, unlit_b = 0;
+
+	int shift = 5;
+	
+	is_lit = ((x>>shift&1) ^ (y>>shift&1))==1; // calculation of a checkerboard
+	
+	get_lit_color = Halide::select(c==0, lit_r, select(c==1, lit_g, lit_b));
+	get_unlit_color = Halide::select(c==0, unlit_r, select(c==1, unlit_g, unlit_b));
+	
+	// NOTE: without uint8_t cast, interprets the <int> output as <u8> which makes a funny picture
+	f(x,y,c) = Halide::cast<uint8_t>( Halide::select(is_lit, get_lit_color, get_unlit_color) ); 
+	
+	Halide::Image<uint8_t> output = f.realize(256,256,3);
+	
+	save(output, "colored_checkerboard.png");
+}
+void run_original_test()
+{
 	// load is from image_io.h
 	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
 	Halide::Var x, y, c;
@@ -943,8 +1097,12 @@ int main(int argc, char **argv) {
 	Halide::Image<uint8_t> output = brighter.realize(input.width(), input.height(), input.channels());
 	
 	// from image_io.h
-	save(output, "rgb_brighter.png");
+	save(output, "rgb_brighter.png");	
+}
+
+int main(int argc, char **argv) {
 	
+	//run_original_test();
 	runOtherTests();
 	
 	return 0;
