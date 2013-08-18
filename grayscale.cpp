@@ -31,7 +31,16 @@ void compositionOfTwo1DFuncs();
 void expressionsTakeParentVariables();
 void expressionWithNestedScopeVariable();
 void sobel();
+void sobel_rdom();
 void grayscale();
+void rdom();
+void rdom_simple();
+void rdom_sum();
+void fib();
+//void histogram();
+void dim2reduction();
+void official_convolve();
+void rdom_dimensionality();
 
 int _errors = 0;
 
@@ -39,7 +48,19 @@ void runOtherTests()
 {
 	_errors = 0;
 	printf("__Running Tests__\n");
+
+	// newest first so they fail faster
+	rdom_dimensionality();
+	official_convolve();
+	sobel_rdom();
+	dim2reduction();
 	
+	//histogram();
+	fib();
+	rdom_sum();
+	rdom_simple();
+	rdom();
+
 	official_argmax();
 
 	simpleFunc();
@@ -430,23 +451,353 @@ void sobel()
 	Halide::Func f;
 	Halide::Expr vs, hs; // vertical sobel filter, horizontal sobel filter
 	
+	// this definition ensures that samples do not lie outside of the image domain
+	// and will return a "clamped" value of the pixel
+	Halide::Func in;
+	int W = input.width();
+	int H = input.height();
+	in(x,y,c) = input(clamp(x,0,W-1), clamp(y,0,H-1), c);
+	
 	// horizontal sobel kernel
-	hs = -1.0f * input(max(x-1,0),max(y-1,0),c) + /*0*/ 1.0f * input(x+1,max(y-1,0),c) +
-	     -2.0f * input(max(x-1,0),y,c)          + /*0*/ 2.0f * input(x+1,y,c) +
-		 -1.0f * input(max(x-1,0),y+1,c)        + /*0*/ 1.0f * input(x+1,y+1,c);
+	hs = -1.0f * in(x-1,y-1,c) + /*0*/ 1.0f * in(x+1,y-1,c) +
+	     -2.0f * in(x-1,y  ,c) + /*0*/ 2.0f * in(x+1,y  ,c) +
+		 -1.0f * in(x-1,y+1,c) + /*0*/ 1.0f * in(x+1,y+1,c);
 		
 	// vertical sobel kernel
-	vs = -1.0f * input(max(x-1,0),max(y-1,0),c) - 2.0f * input(x,max(y-1,0),c)   - 1.0f * input(x+1,max(y-1,0),c) +
-			/* 0 + 0 + 0 */
-		  1.0f * input(max(x-1,0),y+1,c)        + 2.0f * input(x,y+1,c)          + 1.0f * input(x+1,y+1,c);
+	vs = -1.0f * in(x-1,y-1,c) - 2.0f * in(x,y-1,c)   - 1.0f * in(x+1,y-1,c) +
+		  /* 0 + 0 + 0 */
+		  1.0f * in(x-1,y+1,c) + 2.0f * in(x,y+1,c)   + 1.0f * in(x+1,y+1,c);
 	
 	// compute the magnitude of the sobel filter (per component)
 	f(x,y,c) = Halide::cast<uint8_t>( min( sqrt(vs*vs + hs*hs), 255.0f));
 	
-	// HACK: skip the last pixel (width, height) so we don't have to do a min() in the expressions above
-	Halide::Image<uint8_t> output = f.realize( input.width()-1, input.height()-1, input.channels() );
+	// Compute the sobel filter
+	Halide::Image<uint8_t> output = f.realize( W, H, input.channels() );
 	save(output, "sobel.png");
 }
+
+void sobel_rdom()
+{
+	printf("sobel_rdom\n");
+	
+	// sobel filter using reduction domain
+	Halide::Image<uint8_t> rgb = load<uint8_t>("rgb.png");
+	int W = rgb.width();
+	int H = rgb.height();
+	int C = rgb.channels();
+	
+	// clamp edge values
+	Halide::Func input("input");
+	Halide::Var x("x"), y("y"), c("c");
+
+	input(x,y,c) = rgb(clamp(x,0,W-1), clamp(y,0,H-1),c);
+	
+	// define the sobel kernels
+	Halide::Image<float> hsi(3,3);
+	hsi(0,0) = -1; hsi(1,0) = 0; hsi(2,0) = 1;
+	hsi(0,1) = -2; hsi(1,1) = 0; hsi(2,1) = 2;
+	hsi(0,2) = -1; hsi(1,2) = 0; hsi(2,2) = 1;
+	
+	Halide::Image<float> vsi(3,3);
+	vsi(0,0) = -1; vsi(1,0) = -2; vsi(2,0) = -1;
+	vsi(0,1) =  0; vsi(1,1) =  0; vsi(2,1) =  0;
+	vsi(0,2) = +1; vsi(1,2) = +2; vsi(2,2) = +1;
+	
+	Halide::RDom hs( hsi );
+	Halide::RDom vs( vsi );
+	
+	// Sample using reduction
+	Halide::Func fh("fh"), fv("fv"), sobel("sobel"), f("f");
+	
+	// NOTE: Dimensionality of reduction  must match dimension of 'pure definition'
+	//fh(x,y) += input(hs.x, hs.y) * input(x,y); // reduction over horizontal kernel
+	fh(x,y,c) += hsi(hs.x, hs.y) * input(x + hs.x - 1, y + hs.y - 1, c); // offset to center the kernel
+	fv(x,y,c) += vsi(vs.x, vs.y) * input(x + vs.x - 1, y + vs.y - 1, c); // reduction over vertical kernel
+	
+	sobel(x,y,c) = Halide::sqrt(fh(x,y,c)*fh(x,y,c) + fv(x,y,c)*fv(x,y,c)); // sobel magnitude
+	f(x,y,c) = Halide::cast<uint8_t>( min(sobel(x,y,c), 255.0f)); 	// scale
+
+	Halide::Image<uint8_t> output = f.realize( W, H, C );
+	save(output, "sobel_rdom.png");
+}
+
+void rdom_dimensionality()
+{
+	printf("rdom_dimensionality\n");
+	
+	// originally couldn't convolve with a real image... so this test illustratest the dimensionality
+	// problem of using a 2D reduction (RDom(x,y)) on a 3D image (x,y,c)
+	Halide::Image<uint8_t> rgb = load<uint8_t>("rgb.png");
+	int W = rgb.width();
+	int H = rgb.height();
+	
+	Halide::Func input;
+	Halide::Var x, y, c;
+	input(x,y,c) = rgb(clamp(x,0,W-1), clamp(y,0,H-1), c);
+	
+	Halide::Image<uint8_t> tent(3,3);
+	tent(0,0) = 1;
+	tent(1,1) = 1;
+	tent(2,2) = 1;
+	
+	for(int i=0; i<3; i++) {
+		for (int  j=0; j<3; j++) {
+			uint8_t r = tent(i,j);
+			//uint8_t g = tent(i,j);
+			//uint8_t b = tent(i,j);
+			//printf("%d,%d,%d   ", r, g, b);
+			printf("%d   ", r);
+		}
+		printf("\n");
+	}
+	
+	Halide::RDom r(tent);
+	Halide::Func f;
+	
+	f(x,y,c) += tent(r.x,r.y) * input(x+r.x-1,y+r.y-1,c);
+	
+	Halide::Image<uint8_t> output = f.realize( W, H, rgb.channels() );
+	save(output, "rdom_dimensionality.png");
+}
+
+void official_convolve()
+{
+	printf("official_convolve\n");
+	
+    int W = 64*3, H = 64*3;
+
+    Halide::Image<uint16_t> in(W, H);
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            in(x, y) = rand() & 0xff;
+        }
+    }
+
+
+    Halide::Var x("x"), y("y");
+
+    Halide::Image<uint16_t> tent(3, 3);
+    tent(0, 0) = 1;
+    tent(0, 1) = 2;
+    tent(0, 2) = 1;
+    tent(1, 0) = 2;
+    tent(1, 1) = 4;
+    tent(1, 2) = 2;
+    tent(2, 0) = 1;
+    tent(2, 1) = 2;
+    tent(2, 2) = 1;
+    
+    Halide::Func input("input");
+    input(x, y) = in(clamp(x, 0, W-1), clamp(y, 0, H-1));
+
+    Halide::RDom r(tent);
+
+    /* This iterates over r outermost. I.e. the for loop looks like:
+     * for y:
+     *   for x:
+     *     blur1(x, y) = 0
+     * for r.y: 
+     *   for r.x: 
+     *     for y: 
+     *       for x: 
+     *         blur1(x, y) += tent(r.x, r.y) * input(x + r.x - 1, y + r.y - 1)
+     *     
+     * In general, reductions iterate over the reduction domain outermost.
+     */
+    Halide::Func blur1("blur1");
+    blur1(x, y) += tent(r.x, r.y) * input(x + r.x - 1, y + r.y - 1);
+}
+
+// reduction domains
+void rdom()
+{
+	printf("rdom\n");
+	
+	//http://halide-lang.org/Halide/class_halide_1_1_r_dom.html#details
+	Halide::Func f;
+	Halide::RDom r(1,8);
+	Halide::Var x;
+	
+	f(x) = x;
+	f(r) = f(r-1) + f(r) + f(r+1);
+	
+	// NOTE !!!
+	// sample from the first pass, f(x), and store back into the result. since
+	// this is done from 1 to 8, any samples that have already been calculated such
+	// as f(r-1) will be the previous 'reduced' values. any values that have not been
+	// calculated such as f(r+1) will be the 'un-reduced' values (simple 'x'). this
+	// looks like:
+	/*
+		0
+		1  => 0 + 1+2 = 3
+		2  => 3 + 2+3 = 8
+		3  => 8 + 3+4 = 15
+		4  => 15 + 4+5 = 24
+		5  => 24 + 5+6 = 35
+		6  => 35 + 6+7 = 48
+		7  => 48 + 7+8 = 63
+		8  => 63 + 8+9 = 80
+		9
+	*/
+	
+	Halide::Image<int> result = f.realize(10); 
+	
+	int prev = 0;
+	assertEqual(0, result(0), "rdom[0]"); // edge condition, not affected by reduction
+	for(int i=1; i<9; i++) {
+		printf ("result[%d] = %d\n", i, result(i));
+		
+		int v = prev + i + (i+1);
+		assertEqual(v, result(i), "rdom[i]");
+		
+		prev = v;
+	}
+	assertEqual(9, result(9), "rdom[9]"); // edge condition, not affected by reduction
+}
+
+// from the official Doxygen comments in Halide docs
+void rdom_simple()
+{
+	printf("rdom_simple\n");
+	
+	Halide::Func f;
+	Halide::Var x;
+	Halide::RDom r(0,5); // 5 is the extent, max value is 0+5-1 = 4
+
+	f(x) = x;
+	f(r) = f(r) * 2;
+	Halide::Image<int> result = f.realize(10);
+	
+	for(int i=0; i<5; i++) {
+		printf("result[%d] = %d\n", i, result(i));
+		assertEqual(i*2, result(i), "rdom_simple[...]");
+	}
+	for(int i=5; i<10; i++) {
+		assertEqual(i, result(i), "rdom_simple[5..10]");
+	}
+}
+
+void rdom_sum()
+{
+	printf("rdom_sum\n");
+	
+	// sum all numbers in the range
+	Halide::Func f;
+	Halide::Var x;
+	Halide::RDom r(1,9); // start index, length (NOT start index, end index exclusive)
+	
+	f(x) = x;
+	f(r) = f(r) + f(r-1); // apply over each element in place
+	
+	/*
+	rdom_sum
+	result[0] = 0
+	result[1] = 1
+	result[2] = 3
+	result[3] = 6
+	result[4] = 10
+	result[5] = 15
+	result[6] = 21
+	result[7] = 28
+	result[8] = 36
+	result[9] = 45
+	*/
+		
+	Halide::Image<int> result = f.realize(10);
+	
+	int sum = 0;
+	for(int i=0; i<10; i++) {
+		printf("result[%d] = %d\n", i, result(i));
+		
+		sum += i;
+		int v = result(i);
+		
+		assertEqual(sum, v, "rdom_sum[...]");
+	}
+	assertEqual(45, sum, "rdom_sum final sum = (N-1) * N/2");
+}
+
+void fib()
+{
+	printf("fib\n");
+	
+	// from rdom doc (http://halide-lang.org/Halide/class_halide_1_1_r_dom.html#details)
+	// compute fibonacci numbers
+	Halide::Func f;
+	Halide::RDom r(2,18); // first 20
+	Halide::Var x;
+	
+	f(x) = 1;
+	f(r) = f(r-1) + f(r-2);
+	Halide::Image<int> result = f.realize(20);
+	
+	int a = 1, b = 1;
+	for(int i=2; i<20; i++) {
+		int c = a+b;
+		a = b;
+		b = c;
+		assertEqual(c, result(i), "fib");
+	}
+}
+
+#if 0
+// can't get this to work...
+void histogram()
+{
+	printf("histogram\n");
+	
+	// "scattering" from the official Doxygen comments
+
+	// NOTE: UInt is a Halide constructor that returns a Type
+	Halide::ImageParam input(Halide::UInt(8), 2); // 2D image of type 8-bit integer unsigned
+	
+	Halide::Func histogram;
+	Halide::Var x;
+	
+	Halide::RDom r(input);
+	histogram(x) = 0; // initialize
+	histogram(input(r.x,r.y)) = histogram( input(r.x, r.y)) + 1; // scatter
+	
+	Halide::Image<int> result = histogram.realize(10,10);
+	
+}
+#endif
+
+// 2D reduction
+void dim2reduction()
+{
+	printf("dim2reduction\n");
+	
+	Halide::ImageParam input(Halide::Int(8), 2); // 2D 8-bit signed integer
+	
+	input(0,0) = 1;
+	input(0,1) = 2;
+	input(1,0) = 3;
+	input(1,1) = 4;
+	
+	Halide::Func f;
+	Halide::Var x, y;
+	
+	f(x,y) = input(x,y);
+	
+	Halide::Image<int> result = f.realize(2,2);
+	
+	/*
+	assertEqual(2, input.extent(0), "x_extent");
+	assertEqual(2, input.extent(1), "y_extent");
+	
+	// grayscale.cpp:639: error: cannot convert ‘Halide::Expr’ to ‘int’ in initialization
+	int v = input(0,0);
+	
+	for(int i=0; i<2; i++) {
+		for (int j=0; j<2; j++) {
+			//printf("input[%d,%d] = %d", i, j, input(i,j));
+		}
+	}
+	*/
+	
+}
+
 
 int main(int argc, char **argv) {
 	// load is from image_io.h
