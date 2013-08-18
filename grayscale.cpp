@@ -41,6 +41,8 @@ void fib();
 void dim2reduction();
 void official_convolve();
 void rdom_dimensionality();
+void lambda_intro(); // first lambda test
+void official_side_effects();
 
 int _errors = 0;
 
@@ -50,6 +52,8 @@ void runOtherTests()
 	printf("__Running Tests__\n");
 
 	// newest first so they fail faster
+	official_side_effects();
+	lambda_intro();
 	rdom_dimensionality();
 	official_convolve();
 	sobel_rdom();
@@ -476,6 +480,12 @@ void sobel()
 	save(output, "sobel.png");
 }
 
+// magnitude function that can be used by the pipeline
+extern "C" float mag(float dx, float dy) {
+	return (float)sqrt(dx*dx + dy*dy);
+}
+HalideExtern_2(float, mag, float, float);
+
 void sobel_rdom()
 {
 	printf("sobel_rdom\n");
@@ -514,7 +524,19 @@ void sobel_rdom()
 	fh(x,y,c) += hsi(hs.x, hs.y) * input(x + hs.x - 1, y + hs.y - 1, c); // offset to center the kernel
 	fv(x,y,c) += vsi(vs.x, vs.y) * input(x + vs.x - 1, y + vs.y - 1, c); // reduction over vertical kernel
 	
-	sobel(x,y,c) = Halide::sqrt(fh(x,y,c)*fh(x,y,c) + fv(x,y,c)*fv(x,y,c)); // sobel magnitude
+	// compute the magnitude.. actually this doesn't work
+	/*
+	Halide::Expr mag;
+	mag(x,y) = Halide::sqrt(x*x + y*y);
+	*/
+	
+	// compute sobel magnitude
+	// NOTE: uses an "extern" function 'mag'
+	sobel(x,y,c) = mag(fh(x,y,c), fv(x,y,c)); // sobel magnitude
+	
+	//sobel(x,y,c) = Halide::sqrt( fh(x,y,c)*fh(x,y,c) + fv(x,y,c)*fv(x,y,c) );
+	
+	// scale and convert back to u8
 	f(x,y,c) = Halide::cast<uint8_t>( min(sobel(x,y,c), 255.0f)); 	// scale
 
 	Halide::Image<uint8_t> output = f.realize( W, H, C );
@@ -796,6 +818,68 @@ void dim2reduction()
 	}
 	*/
 	
+}
+
+void lambda_intro()
+{
+	// first lambda test
+	printf("lambda_intro\n");
+	
+	Halide::Var x,y;
+	//Halide::Func f;
+	//f(x,y) = x*y;
+	
+	// MUST BE <int>
+	Halide::Image<int> output = lambda(x,y,x*y).realize(10,10);
+	
+	assertEqual(0, output(0,0), "0,0");
+	assertEqual(1, output(1,1), "1,1");
+	assertEqual(12, output(4,3), "4,3");
+	
+	for(int i=0; i<10; i++) {
+		for(int j=0; j<10; j++) {
+			assertEqual(i*j, output(i,j), "lambda_intro(i,j)");
+		}
+	}
+}
+
+// side_effects.cpp (Official from tests)
+extern "C" int argmin(int x, float y) {
+    static float minVal = 1e10;
+    static int minIndex = 0;
+
+    if (y < minVal) {
+        minIndex = x;
+        minVal = y;
+    }
+
+	//printf("extern_c_argmin(%d, %.3f) -> [%d] %.3f\n", x, y, minIndex, minVal);
+
+    return minIndex;
+}
+HalideExtern_2(int, argmin, int, float);
+
+void official_side_effects()
+{
+	printf("official_side_effects\n");
+	
+	    Halide::Var x, y;
+	    Halide::Func f, g, h;
+
+	    f(x) = Halide::sin(x/10.0f+17);
+
+	    // Compute argmin of f over [-100..100]
+	    Halide::RDom r(-100, 100);
+	    g(x) = 0;
+	    g(x) = argmin(r, f(r));
+
+	    Halide::Image<int> result = g.realize(1);
+	    int idx = result(0);
+	    printf("sin(%d/10.0f+17) = %f\n", idx, sinf(idx/10.0f+17));
+
+	    printf("Success!\n");
+	
+		assertEqual(-60, idx, "official_side_effects");
 }
 
 
