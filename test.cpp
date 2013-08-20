@@ -11,9 +11,8 @@
 // DYLD_LIBRARY_PATH=../../bin ./grayscale
 
 #include <Halide.h>
-
-using Halide::Image;
-#include "../apps/support/image_io.h"
+#include "pockethandbook.h"
+#include "stdafx.h"
 
 void simpleFunc();
 void simple1DFunc();
@@ -1087,7 +1086,8 @@ void run_original_test()
 int main(int argc, char **argv) {
 	
 	//run_original_test();
-	runOtherTests();
+	//runOtherTests();
+	PocketHandbook::TestSuite::Run();
 	
 	return 0;
 }
