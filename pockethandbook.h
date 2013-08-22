@@ -11,10 +11,16 @@ namespace PocketHandbook {
 class TestSuite {
 public:
 	static void Run() {
-		TestGraylevelHistogram();
+		TestBinaryDilationFilter();
+		RunBinaryDilationOnRGBImage();
+		//TestBrightness(); 
+		//TestGraylevelHistogram();
 	}
 private:
 	static void TestGraylevelHistogram();
+	static void TestBrightness();
+	static void TestBinaryDilationFilter();
+	static void RunBinaryDilationOnRGBImage();
 };
 	
 // compute the "gray level histogram" of an image.. NOTE:
@@ -40,6 +46,20 @@ public:
 	
 	// convert the normalized histogram from Run into an image
 	void SaveHistogramToImage(Halide::Image<float> histogram, std::string filename);
+};
+
+// Increase or decrease the brightness of an image
+class Brightness
+{
+public:
+	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input, int brightness);
+};
+
+// Dilate the image with a structuring function
+class BinaryDilationFilter
+{
+public:
+	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input);
 };
 
 }

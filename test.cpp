@@ -13,6 +13,7 @@
 #include <Halide.h>
 #include "pockethandbook.h"
 #include "stdafx.h"
+#include "test.h"
 
 void simpleFunc();
 void simple1DFunc();
@@ -47,8 +48,27 @@ void power_native(); // all-native power function
 void checkerboard();
 void colored_checkerboard();
 
+void select_with_mismatched_types(); // bug ?
+
 
 int _errors = 0;
+
+void assertEqual(int expected, int actual, const char* message)
+{
+	if(expected != actual) {
+		printf("ERROR -- expected (%d) actual (%d) -- %s\n", expected, actual, message);
+		++_errors;
+	}
+}
+
+void assertEqual_u8(uint8_t expected, uint8_t actual, const char* message)
+{
+	if(expected != actual) {
+		printf("ERROR -- expected (%d) actual (%d) -- %s\n", expected, actual, message);
+		++_errors;
+	}
+}
+
 
 void runOtherTests()
 {
@@ -56,6 +76,8 @@ void runOtherTests()
 	printf("__Running Tests__\n");
 
 	// newest first so they fail faster
+	select_with_mismatched_types();
+	
 	colored_checkerboard();
 	
 	#if 1 // disable for development
@@ -100,17 +122,6 @@ void runOtherTests()
 	}
 	else {
 		printf("FAIL! %d error(s)\n", _errors);
-	}
-}
-
-void assertEqual(int expected, int actual, const char* message) 
-{
-	if(expected != actual) {
-		printf("ERROR -- expected (%d) actual (%d) -- %s\n", expected, actual, message);
-		++_errors;
-	}
-	else {
-		//printf("Pass... %s\n", message);
 	}
 }
 
@@ -1082,6 +1093,45 @@ void run_original_test()
 	// from image_io.h
 	save(output, "rgb_brighter.png");	
 }
+
+// bug ?
+	void select_with_mismatched_types() 
+	{
+		printf("select_with_mismatched_types\n");
+
+		// works for int
+		Halide::Image<int> img(20);
+		img(0) = 1;
+		img(1) = 2;
+
+		Halide::Func f;
+		Halide::Var x;
+		f(x) = Halide::select( img(x)>0, img(x)*3, -1);
+
+		Halide::Image<int> out = f.realize(20);
+		assertEqual(3, out(0), "[0]");
+		assertEqual(6, out(1), "[1]");
+		assertEqual(-1, out(2), "[2] == -1");
+		assertEqual(-1, out(19), "[19] == -1");
+
+		// with uint8_t, results in a runtime error:
+		// Assertion failed: (false_value.type() == true_value.type() && "Select of mismatched types"), function make, file ../src/include/Halide.h, line 1817.
+
+		Halide::Image<uint8_t> img_byte(20);
+		img_byte(0) = 2;
+		img_byte(1) = 3;
+
+		Halide::Func g;
+		Halide::Var y;
+
+		g(y) = Halide::select(img_byte(y)>0, img_byte(y), (uint8_t)255);
+		Halide::Image<uint8_t> out_byte = g.realize(20);
+
+		assertEqual_u8((uint8_t)4, out_byte(0), "by[0]");
+		assertEqual_u8((uint8_t)6, out_byte(1), "by[1]");
+		assertEqual_u8((uint8_t)255, out_byte(2), "by[2] == 255");
+		assertEqual_u8((uint8_t)255, out_byte(3), "by[3] == 255");
+	}
 
 int main(int argc, char **argv) {
 	
