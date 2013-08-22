@@ -11,16 +11,21 @@ namespace PocketHandbook {
 class TestSuite {
 public:
 	static void Run() {
+		TestFlip(); RunFlipExample();
+		/*
 		TestBinaryDilationFilter();
 		RunBinaryDilationOnRGBImage();
-		//TestBrightness(); 
-		//TestGraylevelHistogram();
+		TestBrightness(); 
+		TestGraylevelHistogram();
+		*/
 	}
 private:
 	static void TestGraylevelHistogram();
 	static void TestBrightness();
 	static void TestBinaryDilationFilter();
 	static void RunBinaryDilationOnRGBImage();
+	static void TestFlip();
+	static void RunFlipExample();
 };
 	
 // compute the "gray level histogram" of an image.. NOTE:
@@ -60,6 +65,15 @@ class BinaryDilationFilter
 {
 public:
 	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input);
+};
+
+// Flip an image
+// pg. 80
+class Flip
+{
+public:
+	// if upDown == false, flips the image left-right
+	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input, bool upDown);
 };
 
 }

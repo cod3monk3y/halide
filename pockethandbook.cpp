@@ -72,6 +72,32 @@ void TestSuite::RunBinaryDilationOnRGBImage()
 	save( output, "binary_dilation_output.png" );
 }
 
+void TestSuite::TestFlip()
+{
+	std::cout << "TestFlip" << std::endl;
+	
+	Halide::Image<uint8_t> input(3,3,3);
+	input(0,0,0) = 1;
+	
+	Flip f;
+	Halide::Image<uint8_t> ud = f.Run(input, true);
+	Halide::Image<uint8_t> lr = f.Run(input, false);
+	
+	assertEqual_u8(0, ud(0,0,0), "updown moves the source pixel");
+	assertEqual_u8(1, ud(0,2,0), "pixel flips to bottom in up-down");
+	assertEqual_u8(0, lr(0,0,0), "left-right moves source pixel");
+	assertEqual_u8(1, lr(2,0,0), "pixel flips to top-right in left-right flip");
+}
+
+void TestSuite::RunFlipExample()
+{
+	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
+	Flip flip;
+	
+	save( flip.Run(input, true), "_flip_up_down.png");
+	save( flip.Run(input, false), "_flip_left_right.png");
+}
+
 // GraylevelHistogram
 Halide::Image<float> GraylevelHistogram::Run(Halide::Image<uint8_t> input)
 {
@@ -212,6 +238,24 @@ Halide::Image<uint8_t> BinaryDilationFilter::Run(Halide::Image<uint8_t> in)
 	
 	// create the output image
 	return g.realize(in.width(), in.height(), in.channels());
+}
+
+// FLIP
+Halide::Image<uint8_t> Flip::Run(Halide::Image<uint8_t> input, bool upDown)
+{
+	Halide::Var x, y, c;
+	Halide::Func f;
+	int W = input.width();
+	int H = input.height();
+	
+	if(upDown) {
+		f(x,y,c) = input(x,H-y-1,c);
+	}
+	else {
+		f(x,y,c) = input(W-x-1,y,c);
+	}
+	
+	return f.realize(input.width(), input.height(), input.channels());
 }
 
 } // namespace PocketHandbook
