@@ -12,6 +12,7 @@
 
 #include <Halide.h>
 #include "pockethandbook.h"
+#include "pca.h"
 #include "stdafx.h"
 #include "test.h"
 
@@ -1157,7 +1158,8 @@ int main(int argc, char **argv) {
 	
 	//run_original_test();
 	//runOtherTests();
-	PocketHandbook::TestSuite::Run();
+	//PocketHandbook::TestSuite::Run();
+	TestPCA();
 	
 	return 0;
 }
