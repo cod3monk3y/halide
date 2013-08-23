@@ -337,25 +337,47 @@ Halide::Image<uint8_t> HSI::Run(Halide::Image<uint8_t> raw_input)
 	g = input(x,y,1);
 	b = input(x,y,2);
 	
-	Halide::Expr temp, hue, saturation, intensity;
-	saturation = 1.0f - 3.0f * Halide::min( r, Halide::min(g, b));
-	intensity = (r + g + b)/3.0f;
+	// iterator over the color channels
+	Halide::RDom CC(0,3); // rgb channels
+	
+	Halide::Expr temp, hue; /*saturation, intensity */
+	//saturation = 1.0f - 3.0f * Halide::min( r, Halide::min(g, b));
+	
+	Halide::Func intensity;
+	intensity(x,y) = Halide::sum( input(x, y, CC.x) )/3.0f;
+	
+	// minimum color function
+	Halide::Func min_c("min_c");
+	min_c(x,y) = 1.0f;
+	min_c(x,y) = Halide::min( min_c(x,y), input(x, y, CC.x)); // minimum channel value at XY
+	
+	// Saturation
+	Halide::Func saturation("sat");
+	saturation(x,y) = 1.0f - 3.0f * min_c(x,y);
 	
 	float TWOPI = 2*3.14159f; //Halide::PI;
 	
 	// Hue is more complicated
-	Halide::Expr A, B;
-	A = Halide::sqrt( Halide::pow(r-1.0f/3.0f,2) + Halide::pow(g-1/3.0f,2) + Halide::pow(b-1/3.0f,2));
-	B = 2/3.0f * (r - 1/3.0f) - 1/3.0f * (b - 1/3.0f) - 1/3.0f * (g - 1/3.0f);
-	temp = Halide::acos( B / (A * Halide::sqrt(2/3.0f))); // 0..PI (half range)
+	Halide::Func A("A"), B("B");
+	A(x,y) = Halide::sqrt( Halide::sum( Halide::pow( input(x,y,CC.x)-1.0f/3.0f, 2)));
+	
+	Halide::Image<float> Bk(3);
+	Bk(0) = 2/3.0f;
+	Bk(1) = -1/3.0f;
+	Bk(2) = -1/3.0f;
+	B(x,y) = Halide::sum( Bk(CC.x) * (input(x,y,CC.x) - 1/3.0f));
+
+	
+	temp = Halide::acos( B(x,y) / (A(x,y) * Halide::sqrt(2/3.0f))); // 0..PI (half range)
+	
 	// if b > g -> hue = 360-theta since acos is only defined from 0 to 180 deg
-	hue = Halide::select( b > g, (TWOPI - temp)/TWOPI, temp/TWOPI ); // 0..1.0 
+	hue = Halide::select( b > g, (TWOPI - temp)/TWOPI, temp/TWOPI ); // 0..1.0
 	
 	// basically a switch statement on the color
 	Halide::Func f;
 	f(x,y,c) = Halide::select(c==0, hue, 
-			   Halide::select(c==1, saturation,
-							/*c==2*/ intensity));
+			   Halide::select(c==1, saturation(x,y),
+							/*c==2*/ intensity(x,y)));
 	
 	// convert back to uint8_t
 	Halide::Func h;
