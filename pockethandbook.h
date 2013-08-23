@@ -11,8 +11,13 @@ namespace PocketHandbook {
 class TestSuite {
 public:
 	static void Run() {
-		TestFlip(); RunFlipExample();
+		TestHSI();
+		RunHSIExample();
 		/*
+		TestGeometricMean();
+		RunGeometricMeanExample();
+		TestFlip(); 
+		RunFlipExample();
 		TestBinaryDilationFilter();
 		RunBinaryDilationOnRGBImage();
 		TestBrightness(); 
@@ -26,6 +31,10 @@ private:
 	static void RunBinaryDilationOnRGBImage();
 	static void TestFlip();
 	static void RunFlipExample();
+	static void TestGeometricMean();
+	static void RunGeometricMeanExample();
+	static void TestHSI();
+	static void RunHSIExample();
 };
 	
 // compute the "gray level histogram" of an image.. NOTE:
@@ -74,6 +83,24 @@ class Flip
 public:
 	// if upDown == false, flips the image left-right
 	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input, bool upDown);
+};
+
+// Compute the geometric mean of an image
+// pg. 88
+class GeometricMeanFilter
+{
+public:
+	// N = size of region, must be an odd number less than 12
+	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input, int N);
+};
+
+// HSI - Hue Saturation Intensity Color Model
+// pg. 97-98
+class HSI
+{
+public:
+	// The resulting 3 channels are H, S, and I
+	Halide::Image<uint8_t> Run(Halide::Image<uint8_t> input);
 };
 
 }

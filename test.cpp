@@ -69,6 +69,15 @@ void assertEqual_u8(uint8_t expected, uint8_t actual, const char* message)
 	}
 }
 
+bool is_odd(int x)
+{
+	return (x&1) == 1;
+}
+
+bool is_even(int x)
+{
+	return (x&1) == 0;
+}
 
 void runOtherTests()
 {
@@ -1124,11 +1133,22 @@ void run_original_test()
 		Halide::Func g;
 		Halide::Var y;
 
-		g(y) = Halide::select(img_byte(y)>0, img_byte(y), (uint8_t)255);
+		
+		uint8_t u8_max = 255;
+		/* works
+		g(y) = Halide::select(img_byte(y) > 0, 
+			Halide::cast<uint8_t>(img_byte(y)),
+			Halide::cast<uint8_t>(u8_max));
+			*/
+		g(y) = Halide::select(img_byte(y) > 0, 
+			Halide::cast<uint8_t>(img_byte(y)),
+			255);
+			
+			
 		Halide::Image<uint8_t> out_byte = g.realize(20);
 
-		assertEqual_u8((uint8_t)4, out_byte(0), "by[0]");
-		assertEqual_u8((uint8_t)6, out_byte(1), "by[1]");
+		assertEqual_u8((uint8_t)2, out_byte(0), "by[0]");
+		assertEqual_u8((uint8_t)3, out_byte(1), "by[1]");
 		assertEqual_u8((uint8_t)255, out_byte(2), "by[2] == 255");
 		assertEqual_u8((uint8_t)255, out_byte(3), "by[3] == 255");
 	}

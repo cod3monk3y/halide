@@ -98,6 +98,44 @@ void TestSuite::RunFlipExample()
 	save( flip.Run(input, false), "_flip_left_right.png");
 }
 
+void TestSuite::TestGeometricMean()
+{
+	
+}
+
+void TestSuite::RunGeometricMeanExample()
+{
+	std::cout << "RunGeometricMeanExample" << std::endl;
+	
+	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
+	GeometricMeanFilter gmf;
+	
+	Halide::Image<uint8_t> output = gmf.Run(input, 3);
+	save(output, "_geometric_mean_3.png");
+	
+	output = gmf.Run(input, 5);
+	save(output, "_geometric_mean_5.png");
+	
+	output = gmf.Run(input, 11);
+	save(output, "_geometric_mean_11.png");
+}
+
+void TestSuite::TestHSI()
+{
+	
+}
+
+void TestSuite::RunHSIExample()
+{
+	std::cout << "RunHSIExample" << std::endl;
+	
+	Halide::Image<uint8_t> input = load<uint8_t>("rgb.png");
+	HSI hsi;
+	
+	Halide::Image<uint8_t> output = hsi.Run(input);
+	save(output, "_hsi.png");
+}
+
 // GraylevelHistogram
 Halide::Image<float> GraylevelHistogram::Run(Halide::Image<uint8_t> input)
 {
@@ -256,6 +294,74 @@ Halide::Image<uint8_t> Flip::Run(Halide::Image<uint8_t> input, bool upDown)
 	}
 	
 	return f.realize(input.width(), input.height(), input.channels());
+}
+
+// GeometricMeanFilter
+Halide::Image<uint8_t> GeometricMeanFilter::Run(Halide::Image<uint8_t> input, int N)
+{
+	if(N >= 12 || is_even(N) || N <= 1)
+		throw "Invalid kernel size. Must be less than 12 and odd";
+		
+	// clamp image sample and convert to float for calculations
+	Halide::Func in;
+	Halide::Var x, y, c;
+	int W = input.width();
+	int H = input.height();
+	in(x,y,c) = Halide::cast<float>(input(clamp(x,0,W-1), clamp(y,0,H-1), c));
+	
+	// define geometric mean
+	Halide::RDom r(-N/2,N,-N/2,N);		// 2D kernel centered at 0,0
+	Halide::Func f("f");				// core method
+	f(x,y,c) = 1.0f;
+	f(x,y,c) = f(x,y,c) * Halide::pow( in(x+r.x, y+r.y, c), 1.0f/(N*N));
+	
+	// clamp to u8
+	Halide::Func g("g");
+	g(x,y,c) = Halide::cast<uint8_t>(clamp(f(x,y,c),0,255));
+	return g.realize( W, H, input.channels());
+}
+
+// compute hue saturation and intensity
+Halide::Image<uint8_t> HSI::Run(Halide::Image<uint8_t> raw_input)
+{
+	if(raw_input.channels() < 3)
+		throw "HSI requires 3 channels (r,g,b)";
+		
+	Halide::Func input; // normalized
+	Halide::Var x, y, c;
+	input(x,y,c) = Halide::cast<float>(raw_input(x,y,c))/255.0f; // normalize to [0,1.0] range
+	
+	// quick access to rgb
+	Halide::Expr r, g, b;
+	r = input(x,y,0);
+	g = input(x,y,1);
+	b = input(x,y,2);
+	
+	Halide::Expr temp, hue, saturation, intensity;
+	saturation = 1.0f - 3.0f * Halide::min( r, Halide::min(g, b));
+	intensity = (r + g + b)/3.0f;
+	
+	float TWOPI = 2*3.14159f; //Halide::PI;
+	
+	// Hue is more complicated
+	Halide::Expr A, B;
+	A = Halide::sqrt( Halide::pow(r-1.0f/3.0f,2) + Halide::pow(g-1/3.0f,2) + Halide::pow(b-1/3.0f,2));
+	B = 2/3.0f * (r - 1/3.0f) - 1/3.0f * (b - 1/3.0f) - 1/3.0f * (g - 1/3.0f);
+	temp = Halide::acos( B / (A * Halide::sqrt(2/3.0f))); // 0..PI (half range)
+	// if b > g -> hue = 360-theta since acos is only defined from 0 to 180 deg
+	hue = Halide::select( b > g, (TWOPI - temp)/TWOPI, temp/TWOPI ); // 0..1.0 
+	
+	// basically a switch statement on the color
+	Halide::Func f;
+	f(x,y,c) = Halide::select(c==0, hue, 
+			   Halide::select(c==1, saturation,
+							/*c==2*/ intensity));
+	
+	// convert back to uint8_t
+	Halide::Func h;
+	h(x,y,c) = Halide::cast<uint8_t>( clamp(f(x,y,c)*255.0f, 0, 255.0f ));
+	
+	return h.realize( raw_input.width(), raw_input.height(), raw_input.channels());
 }
 
 } // namespace PocketHandbook
