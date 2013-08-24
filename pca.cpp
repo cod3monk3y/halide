@@ -13,8 +13,31 @@ void SamplePCA();
 Image<float> Covariance(Image<float> data);
 void TestBLAS();
 void TestLAPACK();
+void dumpImage(std::string hdr, Image<float> img)
+{
+	std::cout << std::endl << "___" << hdr << "__" << std::endl;
+	
+	for (int i=0; i<img.extent(0); i++) {
+		for(int j=0; j<img.extent(1); j++) {
+			std::cout << img(i,j) << " ";
+			
+		}
+		std::cout << std::endl;
+	}
+}
+Image<float> transpose(Image<float> m) 
+{
+	Var x, y;
+	Func f;
+	f(x,y) = m(y,x);
+	return f.realize( m.extent(1), m.extent(0) );
+}
 
+//
 // Principal component analysis
+// Based on http://www.cs.otago.ac.nz/cosc453/student_tutorials/principal_components.pdf
+//
+
 void TestPCA()
 {
 	// specify the dataset
@@ -44,13 +67,15 @@ void TestPCA()
 	}
 	
 	Covariance(data);
+
+	// Test BLAS
+	TestBLAS();
+	TestLAPACK();
 	
 	// Run PCA from the PDF
 	SamplePCA();
 	
-	// Test BLAS
-	TestBLAS();
-	TestLAPACK();
+	
 }
 
 void TestBLAS()
@@ -243,6 +268,8 @@ void SamplePCA()
 	float data_y[] = {2.4f, 0.7f, 2.9f, 2.2f, 3,    2.7f, 1.6f, 1.1f, 1.6f, 0.9f};
 	int N = 10;
 	
+	// samples in COLUMNS (ROW MAJOR)
+	// 2xN
 	Image<float> data(2,N);
 	for(int i=0; i<N; i++) {
 		data(0,i) = data_x[i];
@@ -271,20 +298,110 @@ void SamplePCA()
 	subtract_mean(x,y) = data(x,y) - mean(x);
 	Image<float> data_less_mean = subtract_mean.realize( 2, data.extent(1));
 	
-	std::cout << "DataAdjust" << std::endl;
-	for (int i=0; i<N; i++) {
-		std::cout << data_less_mean(0,i) << " | " << data_less_mean(1,i) << std::endl;
-	}
+	dumpImage( "data_less_mean", data_less_mean);
 	
 	std::cout << "___ Covariance of Data ___" << std::endl;
 	
 	// ALL THE ABOVE is done (duplicated) in the Covariance calculation
 	Image<float> covarmx = Covariance( data );
 	
+	// Eigenvalue/Eigenvector calculation is beyond the scope of implementation
+	// so I'm using BLAS/LAPACK as shipped with Mac OSX Accellerate framework
+
 	EigenVector2 ev[2];
 	ComputeEigenvectors2(covarmx, ev);
 	
 	for(int i=0; i<2; i++) {
 		std::cout << "EigenValue[" << i << "] " << ev[i].value << " : (" << ev[i].x << "," << ev[i].y << ")" << std::endl;
 	}
+	
+	// reproduce the data with only the principal component
+	// easy since we only have 2 components
+	int principal = (ev[0].value > ev[1].value) ? 0 : 1;
+	int other = 1-principal;
+	
+	// feature vector, eigenvectors in columns
+	//  2xF
+	Image<float> fv(2,2); // ROW MAJOR
+	fv(0,0) = ev[principal].x;	// eig1
+	fv(1,0) = ev[principal].y;
+	
+	// leave this out for demonstrating reduced dimensionality
+	fv(0,1) = ev[other].x;		// eig2
+	fv(1,1) = ev[other].y;
+	
+	dumpImage( "feature vector", fv );
+	
+	// Fx2 (F = 1, number of chosen features)
+	Func f_transpose_fv;
+	f_transpose_fv(x,y) = fv(y,x); // transpose the feature vector to get it in Fx2 (F = number of chosen features)
+	
+	std::cout << "_TRANSPOSED FEATURE VECTOR" << std::endl;
+	dumpImage( "feature_vector(transposed)", f_transpose_fv.realize(  fv.extent(1), fv.extent(0)));
+	
+	dumpImage( "DataAdjust:", data_less_mean);
+	
+	// 2xN -- NOTE data_less_mean is already 2xN
+	//Func f_transpose_dataAdjust;
+	//f_transpose_dataAdjust(x,y) = data_less_mean(y,x);
+	
+	//dumpImage( "DataAdjust(transposed)", f_transpose_dataAdjust.realize( data_less_mean.extent(1), data_less_mean.extent(0)));
+	
+	Func f_mul; 
+	RDom ri(0,fv.extent(0)); 				// prior to transposition, this is (0,2)
+	
+	Var i, j;
+	// multiple reduction domains found
+	f_mul(i,j) = sum( f_transpose_fv(i, ri.x) * data_less_mean(ri.x, j) ); // matrix multiplication
+	
+	
+	Image<float> finalData = f_mul.realize( fv.extent(1), data_less_mean.extent(1) );  // (1,N)
+	
+	dumpImage( "Final Data (reduced dimensions)", finalData);
+	
+	dumpImage( "Final Data (in table form for spreadsheet)", transpose(finalData));
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
